@@ -39,6 +39,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent/tts/models";
 import { getConfigRootDir, setAgentDir } from "@oh-my-pi/pi-utils";
 import type { z } from "zod/v4";
+import { TOOL_NAME as DELAYED_MCP_TOOL_NAME } from "./fixtures/delayed-tool-mcp";
 
 /**
  * Validate an ACP wire payload against the external `@agentclientprotocol/sdk`
@@ -2516,4 +2517,61 @@ describe("ACP agent", () => {
 			expect(third.sessionId).toBe("session-after-switch");
 		});
 	});
+});
+
+describe("ACP agent MCP server configuration (late-connecting servers)", () => {
+	const FIXTURE_PATH = path.join(import.meta.dir, "fixtures", "delayed-tool-mcp.ts");
+	const BUN_EXEC = process.execPath;
+
+	// Real polling, not fake timers: the fixture is a genuine child process
+	// racing MCPManager's own `Bun.sleep`-based 250ms startup window, and a
+	// subprocess's timers cannot be advanced from this test's fake-timer clock.
+	async function pollUntil(predicate: () => boolean, timeoutMs = 3_000): Promise<void> {
+		const deadline = Date.now() + timeoutMs;
+		while (!predicate()) {
+			if (Date.now() >= deadline) throw new Error("pollUntil timed out");
+			await Bun.sleep(5);
+		}
+	}
+
+	/**
+	 * Regression test: an MCP server that finishes connecting after
+	 * `MCPManager`'s 250ms startup race window used to have its tools
+	 * silently discarded — `#configureMcpServers` only called
+	 * `session.refreshMCPTools` once, synchronously, with whatever
+	 * `connectServers` returned inside the race window. The background
+	 * `onToolsChanged` -> `refreshMCPTools` follow-up now runs through a
+	 * `refreshChain` queue so late connections still land in the session.
+	 */
+	it("delivers a late-connecting server's tools via a queued refreshMCPTools call", async () => {
+		const harness = await createHarness();
+		const refreshCalls: string[][] = [];
+		const originalRefresh = FakeAgentSession.prototype.refreshMCPTools;
+		FakeAgentSession.prototype.refreshMCPTools = async function (tools: Array<{ name: string }>) {
+			refreshCalls.push(tools.map(tool => tool.name));
+			return originalRefresh.call(this, tools);
+		};
+
+		try {
+			const created = await harness.agent.newSession({
+				cwd: harness.cwdA,
+				mcpServers: [{ name: "delayed", command: BUN_EXEC, args: [FIXTURE_PATH], env: [] }],
+			});
+			expectAcpStructure(zNewSessionResponse, created);
+
+			// The fixture delays its `initialize` response past the 250ms startup
+			// race, so the first (synchronous) refresh inside `#configureMcpServers`
+			// must see no tools yet.
+			expect(refreshCalls).toHaveLength(1);
+			expect(refreshCalls[0]).toEqual([]);
+
+			// Once the delayed `initialize` response lands, the background
+			// `onToolsChanged` -> queued `refreshMCPTools` call must deliver the
+			// server's tool. Before the fix, this late arrival was dropped.
+			await pollUntil(() => refreshCalls.length > 1);
+			expect(refreshCalls.at(-1)).toEqual([`mcp__delayed_${DELAYED_MCP_TOOL_NAME}`]);
+		} finally {
+			FakeAgentSession.prototype.refreshMCPTools = originalRefresh;
+		}
+	}, 15_000);
 });
