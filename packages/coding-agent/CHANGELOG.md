@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The subagent idle yield-reminder now leads with a completion branch: an agent whose assignment is finished is told to call terminal `yield` immediately, ahead of the "resume the work" option, and is explicitly forbidden from searching the environment, the hub roster, or peer histories for new work. Prevents a one-shot report-then-stop subagent from confabulating a fresh task after it goes idle. The budget-stop forced-wrap-up branch is unchanged.
+
 ## [17.0.6] - 2026-07-20
 
 - Fixed failed plan-mode exits leaving the session on the restored execution model while plan mode remained active and silently changing ambient `xd://` tool presentation; rollback now restores the plan model, thinking level, and exact top-level-versus-mounted tool partition so exit can be retried safely ([#6013](https://github.com/can1357/oh-my-pi/pull/6013)).

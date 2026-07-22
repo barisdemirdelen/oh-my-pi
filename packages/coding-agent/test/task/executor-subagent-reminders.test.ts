@@ -14,7 +14,8 @@ import {
 } from "@oh-my-pi/pi-coding-agent/task/executor";
 import type { AgentDefinition } from "@oh-my-pi/pi-coding-agent/task/types";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
-import { logger } from "@oh-my-pi/pi-utils";
+import { logger, prompt } from "@oh-my-pi/pi-utils";
+import subagentYieldReminderTemplate from "../../src/prompts/system/subagent-yield-reminder.md" with { type: "text" };
 
 function createAssistantStopMessage(text: string): AssistantMessage {
 	return {
@@ -860,5 +861,48 @@ describe("runSubprocess telemetry propagation", () => {
 
 		expect(createAgentSessionSpy).toHaveBeenCalledTimes(1);
 		expect(createAgentSessionSpy.mock.calls[0]?.[0]?.telemetry).toBeUndefined();
+	});
+});
+
+describe("subagent yield-reminder template render", () => {
+	const renderNonBudget = () =>
+		prompt.render(subagentYieldReminderTemplate, {
+			retryCount: 1,
+			maxRetries: 3,
+			budgetStop: false,
+		});
+
+	it("presents the completion branch before the resume branch", () => {
+		const rendered = renderNonBudget();
+		const completeIndex = rendered.indexOf("Assignment complete");
+		const resumeIndex = rendered.indexOf("Resume the work");
+		expect(completeIndex).toBeGreaterThanOrEqual(0);
+		expect(resumeIndex).toBeGreaterThanOrEqual(0);
+		expect(completeIndex).toBeLessThan(resumeIndex);
+	});
+
+	it("tells a finished agent to call terminal yield now", () => {
+		const rendered = renderNonBudget();
+		expect(rendered).toMatch(/Assignment complete[\s\S]*call terminal `yield` immediately/);
+	});
+
+	it("forbids scanning the environment, hub roster, or peer histories for new work", () => {
+		const rendered = renderNonBudget();
+		expect(rendered).toContain("NEVER adds new work");
+		expect(rendered).toContain("the environment");
+		expect(rendered).toContain("the hub roster");
+		expect(rendered).toContain("peer histories");
+	});
+
+	it("leaves the budget-stop branch as a forced terminal yield", () => {
+		const rendered = prompt.render(subagentYieldReminderTemplate, {
+			retryCount: 1,
+			maxRetries: 3,
+			budgetStop: true,
+		});
+		expect(rendered).toContain("forced wrap-up");
+		expect(rendered).toContain("you MUST call `yield` NOW");
+		expect(rendered).not.toContain("Assignment complete");
+		expect(rendered).not.toContain("Resume the work");
 	});
 });
