@@ -55,24 +55,22 @@ function buildResult(method: string): Record<string, unknown> {
 function startServer(): void {
 	const rl = readline.createInterface({ input: process.stdin });
 	rl.on("line", line => {
-		const trimmed = line.trim();
-		if (trimmed.length === 0) return;
-		let msg: JsonRpcRequest;
-		try {
-			msg = JSON.parse(trimmed) as JsonRpcRequest;
-		} catch {
-			return;
-		}
-		if (msg.id === undefined || msg.id === null) return;
-		const respond = () => {
+		void (async () => {
+			const trimmed = line.trim();
+			if (trimmed.length === 0) return;
+			let msg: JsonRpcRequest;
+			try {
+				msg = JSON.parse(trimmed) as JsonRpcRequest;
+			} catch {
+				return;
+			}
+			if (msg.id === undefined || msg.id === null) return;
+			if (msg.method === "initialize") {
+				await Bun.sleep(INITIALIZE_DELAY_MS);
+			}
 			const response = { jsonrpc: "2.0" as const, id: msg.id, result: buildResult(msg.method) };
 			process.stdout.write(`${JSON.stringify(response)}\n`);
-		};
-		if (msg.method === "initialize") {
-			setTimeout(respond, INITIALIZE_DELAY_MS);
-			return;
-		}
-		respond();
+		})();
 	});
 	rl.on("close", () => process.exit(0));
 }

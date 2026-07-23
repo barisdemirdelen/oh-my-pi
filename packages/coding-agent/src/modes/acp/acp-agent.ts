@@ -2424,7 +2424,7 @@ export class AcpAgent implements Agent {
 		}
 
 		record.mcpManager = manager;
-		await record.session.refreshMCPTools(result.tools);
+		await enqueueMcpToolsRefresh();
 	}
 
 	#toMcpConfig(server: McpServer): MCPServerConfig {

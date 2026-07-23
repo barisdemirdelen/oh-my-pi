@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -2545,12 +2545,8 @@ describe("ACP agent MCP server configuration (late-connecting servers)", () => {
 	 */
 	it("delivers a late-connecting server's tools via a queued refreshMCPTools call", async () => {
 		const harness = await createHarness();
-		const refreshCalls: string[][] = [];
-		const originalRefresh = FakeAgentSession.prototype.refreshMCPTools;
-		FakeAgentSession.prototype.refreshMCPTools = async function (tools: Array<{ name: string }>) {
-			refreshCalls.push(tools.map(tool => tool.name));
-			return originalRefresh.call(this, tools);
-		};
+		const refreshSpy = spyOn(FakeAgentSession.prototype, "refreshMCPTools");
+		const namesOf = (tools: unknown[]) => (tools as Array<{ name: string }>).map(tool => tool.name);
 
 		try {
 			const created = await harness.agent.newSession({
@@ -2562,16 +2558,16 @@ describe("ACP agent MCP server configuration (late-connecting servers)", () => {
 			// The fixture delays its `initialize` response past the 250ms startup
 			// race, so the first (synchronous) refresh inside `#configureMcpServers`
 			// must see no tools yet.
-			expect(refreshCalls).toHaveLength(1);
-			expect(refreshCalls[0]).toEqual([]);
+			expect(refreshSpy.mock.calls).toHaveLength(1);
+			expect(namesOf(refreshSpy.mock.calls[0]?.[0] ?? [])).toEqual([]);
 
 			// Once the delayed `initialize` response lands, the background
 			// `onToolsChanged` -> queued `refreshMCPTools` call must deliver the
 			// server's tool. Before the fix, this late arrival was dropped.
-			await pollUntil(() => refreshCalls.length > 1);
-			expect(refreshCalls.at(-1)).toEqual([`mcp__delayed_${DELAYED_MCP_TOOL_NAME}`]);
+			await pollUntil(() => refreshSpy.mock.calls.length > 1);
+			expect(namesOf(refreshSpy.mock.calls.at(-1)?.[0] ?? [])).toEqual([`mcp__delayed_${DELAYED_MCP_TOOL_NAME}`]);
 		} finally {
-			FakeAgentSession.prototype.refreshMCPTools = originalRefresh;
+			refreshSpy.mockRestore();
 		}
 	}, 15_000);
 });
