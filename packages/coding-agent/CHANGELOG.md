@@ -8,29 +8,19 @@
 ### Breaking Changes
 
 - Replaced the `providers.webSearch` and `providers.image` single-preference enums with the `providers.webSearchOrder` and `providers.imageOrder` priority lists. Existing config values migrate automatically: a concrete legacy choice becomes the head of the new list with the remaining providers appended in their built-in order, and `auto` simply resets to the default chain.
+## [17.1.1] - 2026-07-24
 
 ### Added
 
-- Added `error.notify` so failed model turns can emit distinct terminal/desktop notifications without changing completion notifications ([#2691](https://github.com/can1357/oh-my-pi/issues/2691)).
-- Added auto-following light and dark themes to HTML session exports, with a `/export --themes` option to bundle the user's selected TUI themes.
-- Added owner-routed async job delivery: every session (including subagents) registers its own delivery sink, so background bash/task results are injected into the owning agent's run instead of the first top-level session; deliveries whose owner is gone are dead-lettered with the result retained on the job row.
-- Added `AsyncJobManager.registerDeliverySink` and `AsyncJobManager.waitForOwnerJobs` (with an `excludeSuppressed` filter for quiescence checks).
-- Added background-on-steer for auto-backgrounded bash: an incoming user/peer message backgrounds the running command (instead of waiting it out or killing it) so the message is handled promptly.
-- Added `friendlyName` support for hidden secrets so model-visible placeholders can carry sanitized semantic labels, content-derived hashes, and case hints while preserving exact deobfuscation ([#2465](https://github.com/can1357/oh-my-pi/issues/2465)).
-- Made the statusline `git` segment jj-aware: in a Jujutsu repo it shows the nearest bookmark (falling back to the short change-id) instead of git's `detached` label or nothing, and working-copy change counts come from jj where there is no `.git` to read ([#3582](https://github.com/can1357/oh-my-pi/issues/3582))
-- Added `block`/`unblock` todo operations and a `blocked` status for tasks waiting on external input; blocked tasks stay visible in the todo HUD and summary but are excluded from the incomplete-todo stop reminder, and an optional blocker note records what the task is waiting for.
-- Added a toggle-list editor in `/settings` for array-of-enum settings: `providers.webSearchOrder` and `providers.imageOrder` (ordered — Enter/Space toggles, ←/→ nudges, 1-9 splices the hovered provider into that position) and `providers.webSearchExclude` now appear under Providers → Services instead of being config-file only.
-- Added `models.yml` Bedrock Converse prompt-cache capability overrides for bundled and opaque inference profiles.
-- Documented Vibe mode (`/vibe`) in `docs/vibe-mode.md` and the `/fresh` provider-stream reset in the session-operations doc, and linked both from the README's new "Session controls" section ([#6440](https://github.com/can1357/oh-my-pi/issues/6440)).
+- Added the `/session pin` subcommand and account picker to pin provider OAuth accounts for the current session
+- Added the disabled-by-default `computer` essential tool with configurable enablement, backend, display, and maximum width/height settings. Native desktop execution runs through a `DesktopSession` worker; observation uses read approval, input uses exec approval, and provider checks always prompt and fail closed.
+- Added the `/computer` slash command (`on`/`off`/`status`/toggle) to enable or disable the computer tool for the current session without persisting settings.
+- Exposed `computer` to models without native OpenAI computer-use support as a regular function tool with a typed GA action schema; the same native desktop backend and approval policy apply on both paths.
+- Hardened computer action ingress: action-specific fields, modifier/key arrays, coordinates, drag points, and scroll deltas fail closed before native input; numeric fields must be signed 32-bit integers and coordinates must be non-negative.
 
 ### Changed
 
-- Subagents now inherit `async.enabled` and `bash.autoBackground.enabled` from the parent instead of having both force-disabled. Subagent runs complete only after their own background jobs settle and the agent submits a `yield` that postdates every delivered result: a terminal yield with jobs still pending parks the run (recoverable turn stop) instead of completing it, async results are folded in as follow-up turns (with a one-time notice offering `hub` wait/cancel), a result delivered after a yield supersedes that yield and re-runs the yield reminder ladder, and a run that never refreshes a superseded yield fails with the stale payload preserved as salvage. Teardown cancels and awaits surviving jobs before isolation worktree capture and cleanup.
-- Added ordered `bash.patterns` command approval rules so selected bash commands can be allowed, prompted, or denied by command pattern.
-- Cache full-session retention transcript incrementally instead of re-formatting the entire message history on every retain cycle ([#4246](https://github.com/can1357/oh-my-pi/issues/4246))
-- Bound interactive bash live display write queue to prevent unbounded PTY chunk backlog ([#4240](https://github.com/can1357/oh-my-pi/issues/4240))
-- All Markdown flavors (`.markdown`, `.mdx`, `.mdc`, `.mkd`, `.mdown`) now follow the `read.summarize.prose` setting like `.md`, so they read verbatim instead of being code-block summarized when prose summaries are off.
-- xAI web search now uses `grok-4.5` (at low reasoning effort) instead of `grok-4.3`.
+- Replaced Chromium-backed `/live` media and external speech recorder/player subprocesses with the cross-platform native microphone, speaker, Opus, and WebRTC stack from `@oh-my-pi/pi-natives`.
 
 ### Fixed
 
@@ -92,11 +82,67 @@
 - Bounded vibe teardown so `vibe_kill` and Vibe-mode exit / session-switch suspension no longer hang when a cancelled turn's provider or tool ignores the abort signal: cancelled jobs get a short unref'd settlement grace, then detach while staying marked cancelled ([#5303](https://github.com/can1357/oh-my-pi/issues/5303) by [@RensTillmann](https://github.com/RensTillmann)).
 - Fixed switching out of a Vibe-mode session clobbering the target session's active tools: mode reconciliation now strips only the transient vibe tools and preserves the freshly loaded target's tool set, instead of re-applying the source session's stale pre-vibe snapshot ([#5303](https://github.com/can1357/oh-my-pi/issues/5303)).
 - Fixed restored Vibe workers resolving against the settings default model instead of the reopened session's active model: `#reconcileModeFromSession` now passes the session's active model string into rehydration so the `good` (`pi/task`) worker's inherited model tracks the resumed or switched-to session ([#5303](https://github.com/can1357/oh-my-pi/issues/5303)).
+- Fixed live-call attestation depending on the ChatGPT desktop app being installed: `generateLiveAttestation` now mints DeviceCheck tokens in-process through the `@oh-my-pi/pi-natives` `deviceCheckGenerateToken` binding instead of probing `/Applications` for the app's `devicecheck.node` addon, so the `x-oai-attestation` header works on hosts without the desktop app and drops the `createRequire` addon probing; the attestation provider is now wired up to `@oh-my-pi/pi-ai` for ChatGPT-OAuth Codex requests.
+- Fixed `xd://` device execution failures rendering as `write` errors instead of using the mounted tool's own error renderer.
+- Fixed custom tools without bespoke renderers losing the default state-tinted card when mounted under `xd://`; dispatched calls now keep their label, arguments, status, output preview, and expansion affordance instead of dumping a bare result line into the transcript.
+- Fixed the clipboard image-paste keybind mangling copied URL text into a bogus path error on macOS (e.g. `Image not found at /https/::i.can.ac:CE4Ek3.png` for a copied `https://i.can.ac/CE4Ek3.png`). AppleScript's `the clipboard as «class furl»` coerces plain *text* into a file URL by treating the string as an HFS path (`:`↔`/` swap), so `readMacFileUrlsFromClipboard` returned a garbage path that dead-ended in `handleImagePathPaste` instead of falling through to the text paste. The script now bails early via `clipboard info for «class furl»` unless the pasteboard actually carries a `public.file-url` representation, so URL/text clipboards paste as text.
+- Fixed spilled tool-output artifact descriptors leaking on error/abort paths. `OutputSink.dump()` was the only path that closed the spill `Bun.FileSink`, but the bash and Python executors re-throw on failure and their `finally` blocks never closed the sink, so a large-output command that errored leaked the artifact descriptor until an unrelated read (e.g. a `SKILL.md` load) hit `EMFILE`. `OutputSink` now exposes an idempotent `dispose()` that closes the sink exactly once, wired into every executor's `finally` ([#6463](https://github.com/can1357/oh-my-pi/issues/6463)).
+- Fixed the first submitted prompt stalling while the local tiny-title worker started: the interactive submit handler now paints the pending user row before starting title generation, and startup prewarms an idle, unref'd worker so the first submit reuses a live subprocess instead of paying spawn latency ahead of the first frame ([#6462](https://github.com/can1357/oh-my-pi/issues/6462)).
+- Fixed legacy Pi extensions failing validation when importing the upstream `keyText` keybinding helper ([#6470](https://github.com/can1357/oh-my-pi/issues/6470)).
 
-### Removed
+## [17.1.0] - 2026-07-24
 
-- Added dynamic multi-root workspace context (issue [#2569](https://github.com/can1357/oh-my-pi/issues/2569)): a session now carries an ordered list of workspace directories beyond `cwd`, managed live from the terminal. New `/add-dir <path>`, `/remove-dir <path>`, and `/dirs` slash commands let you add and remove folders mid-session; the repeatable `--add-dir <path>` CLI flag seeds them at launch, and the `workspace.additionalDirectories` setting persists defaults per project. Additional roots are persisted in the session header, survive reopen/fork/move, and are surfaced to the agent in the system prompt so it knows they exist and can `read`/`grep`/`glob` them by absolute path. Design aligns with the endorsed community implementation on `feature/session-workspace`.
-- Fixed the `browser` tool's `open` action ignoring the requested `timeout` during browser acquisition (CDP discovery/connect ran to its own fixed wait), and orphaning a freshly-created browser on abort/timeout before tab publication. The requested timeout now bounds the whole open lifecycle, and one explicit registry lease is held across tab acquisition so rollback disposes exactly the failed open — a concurrent open of a different tab name on the same browser can no longer dispose the browser out from under it. ([#6365](https://github.com/can1357/oh-my-pi/issues/6365))
+### Breaking Changes
+
+- Replaced the `providers.webSearch` and `providers.image` single-preference configuration options with `providers.webSearchOrder` and `providers.imageOrder` priority lists. Existing configurations migrate automatically on startup.
+
+### Added
+
+- Added dynamic multi-root workspace context support, allowing users to manage multiple workspace directories mid-session via `/add-dir`, `/remove-dir`, and `/dirs` slash commands, or seed them at launch using the `--add-dir` CLI flag.
+- Added `/live`, a Codex-authenticated real-time voice interface that streams microphone audio over WebRTC and routes coding tasks through the active agent session.
+- Added opt-in usage-aware model fallback for rationed coding plans, including a `/usage` command to view live quantitative usage data and automatic fallback chain traversal.
+- Added `error.notify` configuration to allow failed model turns to trigger distinct terminal or desktop notifications.
+- Added auto-following light and dark themes to HTML session exports, with a `/export --themes` option to bundle selected TUI themes.
+- Added owner-routed asynchronous job delivery, ensuring background bash and task results are injected directly into the owning subagent or agent session rather than the top-level session.
+- Added background-on-steer capability for auto-backgrounded bash commands, allowing incoming user or peer messages to immediately background running commands.
+- Added `friendlyName` support for hidden secrets, allowing model-visible placeholders to carry sanitized semantic labels, hashes, and case hints.
+- Added support for Jujutsu (`jj`) repositories in the statusline `git` segment, displaying the nearest bookmark or change ID and retrieving working-copy change counts.
+- Added `block` and `unblock` operations for tasks, introducing a `blocked` status for tasks waiting on external input to exclude them from incomplete-todo reminders.
+- Added a toggle-list editor in `/settings` for managing array-of-enum settings like search and image provider orders.
+- Added `models.yml` Bedrock Converse prompt-cache capability overrides for bundled and opaque inference profiles.
+- Added `getServiceTiers()` and `setServiceTier()` extension APIs to read and modify the live per-family service tier for session requests.
+- Added opt-in `omp bench --cache` for independent cold/warm prompt-cache benchmarking with stable-prefix controls.
+- Added `tools.xdevDocs` prompt-doc modes and the `tools.xdevInlineDevices` glob allowlist to control which mounted device documentation is inlined into the system prompt.
+- Added the opt-in `read.renderMarkdown` setting for formatted Markdown read previews.
+
+### Changed
+
+- Updated subagent behavior to inherit `async.enabled` and `bash.autoBackground.enabled` from parent sessions, and refined subagent run completion to wait for background jobs to settle.
+- Added ordered `bash.patterns` command approval rules to allow, prompt, or deny bash commands by pattern.
+- Updated Markdown file handling so all Markdown flavors (`.markdown`, `.mdx`, `.mdc`, etc.) respect the `read.summarize.prose` setting.
+- Upgraded xAI web search to use `grok-4.5` at low reasoning effort instead of `grok-4.3`.
+- Improved search provider resilience by cascading and falling back through other configured search providers when the preferred provider fails.
+- Extended the bash tool's `direnv` and `devenv` auto-loading to all backends (including the ACP client terminal and interactive PTY) while honoring `direnv`'s local allow list.
+
+### Fixed
+
+- Fixed a path traversal vulnerability in blob reference resolution by rejecting non-canonical hashes in `parseBlobRef`.
+- Fixed multiple edge cases in the secret obfuscation and redaction engine, including handling of context-sensitive regexes, placeholder key requirements in unwritable directories, friendly-name forgery vulnerabilities, and regex match boundaries straddling existing placeholders.
+- Fixed a first-use race condition in `ArtifactManager` where concurrent callers could allocate duplicate artifact IDs.
+- Fixed Vibe-mode session stability, resolving issues with workers disappearing across restarts, hanging during teardown, clobbering target tools during session switches, and resolving against incorrect models.
+- Fixed concurrent MCP configuration mutations losing updates by serializing read-modify-write operations under a per-file lock with atomic writes.
+- Fixed legacy extensions failing to load on npm/source-link installs due to transitive CommonJS dependency graph clobbering.
+- Fixed `omp auth-gateway` commands bypassing the process-scoped OAuth account pool configured via environment variables.
+- Fixed terminal transcript rendering issues where displaceable snapshots (like waiting polls and todo lists) spammed native scrollback.
+- Fixed the terminal title to reflect the active agent run state (working, waiting, or blocked) when `tui.titleState` is enabled.
+- Fixed the `browser` tool's `open` action ignoring timeouts during browser acquisition and leaking orphaned browser instances.
+- Fixed the `write` tool silently creating empty files when a read-tool selector was mis-dispatched as a write.
+- Fixed snapcompact archiving reproducing assistant reasoning (`¶think:` sections) into replayed frames for Anthropic-dialect models.
+- Fixed Linux socket-mode DAP launches hanging indefinitely on connection failures.
+- Fixed Plan Review annotations being discarded on dismissal and limited to headings.
+- Fixed Assistant-mode TTS playback aborting prematurely when an agent continued after a tool call.
+- Fixed absolute usage amounts rendering inconsistently across CLI, TUI, and ACP output surfaces.
+- Fixed MCP sessions dropping tools from servers that finished connecting after the initial startup window.
 
 ## [17.0.9] - 2026-07-23
 
@@ -315,14 +361,6 @@
 - Fixed the Cursor-backed advisor losing entire turns when it selected server-native tools (`bash`, `grep`, etc.) outside its grant: exec-resolved native blocks are already rejected in-band by the advisor-scoped bridge, so they no longer trip the unavailable-tool quarantine and discard the `advise` emitted in the same turn ([#5900](https://github.com/can1357/oh-my-pi/issues/5900)).
 - Fixed custom `anthropic-messages` OAuth providers being unable to opt into configured Claude Code fingerprint header overrides. ([#5888](https://github.com/can1357/oh-my-pi/issues/5888))
 - Fixed authoritative providers (e.g. `openai-codex`) keeping unsupported bundled models selectable when a fresh model cache and an expired OAuth token coincided: built-in discovery now forces the OAuth refresh so the provider's model manager is constructed and prunes stale bundled entries (e.g. `gpt-5.4-nano`) instead of waiting out the cache TTL. ([#5364](https://github.com/can1357/oh-my-pi/issues/5364))
-- Added `providers.webSearchOrder` to prioritize web-search fallbacks while preserving the built-in order for unlisted providers; a failing preferred provider now continues through that fallback chain.
-
-### Changed
-
-- Changed `providers.webSearch` preferred provider failure handling to fall back and cascade through other configured/default search providers rather than stopping immediately.
-### Fixed
-
-- Fixed snapcompact archiving reproduced assistant reasoning (`¶think:` sections) into frames replayed to the model on every subsequent request, wedging Fable 5 sessions on `reasoning_extraction` refusals; snapcompact serialization now excludes reasoning when the session model uses the Anthropic dialect ([#6093](https://github.com/can1357/oh-my-pi/issues/6093)).
 
 ## [17.0.5] - 2026-07-18
 
